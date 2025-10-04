@@ -10,6 +10,7 @@ import {
   forgotPasswordMailgenContent,
   sendEMail,
 } from "../utils/mail.ts";
+import { deleteMediaFromCloudinary, uploadImageOnCloudinary } from "../utils/cloudinary.ts";
 
 export const signup = asyncHandler(async (req: Request, res: Response) => {
   const { username, email, password, contact } = req.body;
@@ -75,7 +76,7 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
     throw new ApiError(404, "User not found");
   }
 
-  const isPasswordCorrect = await user.isPasswordCorrect(password);
+  const isPasswordCorrect = user.isPasswordCorrect(password);
 
   if (!isPasswordCorrect) {
     throw new ApiError(401, "Invalid credentials");
@@ -145,7 +146,7 @@ export const verifyEmail = asyncHandler(async (req: Request, res: Response) => {
 
   return res
     .status(200)
-    .json(new ApiResponse(200, { isEmailVerified: true }, "Email is verified"));
+    .json(new ApiResponse(200, {user}, "Email is verified"));
 });
 
 export const logout = asyncHandler(async (req: Request, res: Response) => {
@@ -238,7 +239,7 @@ export const refreshAccessToken = asyncHandler(
   }
 );
 
-export const forgotPassword = asyncHandler(
+export const forgotPasswordRequest = asyncHandler(
   async (req: Request, res: Response) => {
     const { email } = req.body;
     const user = await User.findOne({ email });
@@ -277,7 +278,11 @@ export const forgotPassword = asyncHandler(
 export const resetForgottenPassword = asyncHandler(
   async (req: Request, res: Response) => {
     const { resestToken } = req.params;
-    const { password } = req.body;
+    const { newPassword } = req.body;
+
+    if (!resestToken) {
+      throw new ApiError(400, "Password reset token is missing");
+    }
 
     let hashedToken = crypto
       .createHash("sha256")
@@ -295,7 +300,7 @@ export const resetForgottenPassword = asyncHandler(
 
     user.forgotPasswordToken = undefined;
     user.forgotPasswordTokenExpiresAt = undefined;
-    user.password = password;
+    user.password = newPassword;
 
     await user.save();
 
@@ -315,7 +320,7 @@ export const changeCurrentPassword = asyncHandler(
       throw new ApiError(404, "User is not authenticated");
     }
 
-    const isPasswordCorrect = await user.isPasswordCorrect(oldPassword);
+    const isPasswordCorrect = user.isPasswordCorrect(oldPassword);
 
     if (!isPasswordCorrect) {
       throw new ApiError(401, "Invalid old password");
@@ -330,6 +335,61 @@ export const changeCurrentPassword = asyncHandler(
   }
 );
 
+export const checkAuth = asyncHandler(async (req: Request, res: Response) => {
+  const user = await User.findById(req.user?._id).select(
+    "-password -refreshToken -emailVerificationToken -emailVerificationExpiry"
+  );
+
+  if (!user) {
+    throw new ApiError(404, "User not found");
+  }
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, { user }, "User is authenticated"));
+})
+
 export const updateProfile = asyncHandler(async (req: Request, res: Response) => {
-    
+  const { address, username, city, country } = req.body ?? {};
+  const profilePicture = req.file;
+  const userId = req.user?._id;
+
+  const user = await User.findById(userId);
+
+  if (!user) {
+    throw new ApiError(404, "User not found");
+  }
+
+  let cloudinaryUrl = "";
+
+  if (profilePicture) {
+    cloudinaryUrl = await uploadImageOnCloudinary(profilePicture as Express.Multer.File);
+
+    if (!cloudinaryUrl) {
+      throw new ApiError(500, "Failed to upload image");
+    }
+
+    if (user.profilePicture) {
+      const publicId = user.profilePicture?.split("/")?.pop()?.split(".")[0];
+      if (publicId) {
+        await deleteMediaFromCloudinary(publicId);
+      } else {
+        throw new ApiError(500, "Failed to get public ID of the old image");
+      }
+    }
+  }
+
+  if (username) user.username = username;
+  if (address) user.address = address;
+  if (city) user.city = city;
+  if (country) user.country = country;
+  if (profilePicture) user.profilePicture = cloudinaryUrl;
+
+  await user.save();
+
+  const updatedUser = await User.findById(userId).select(
+    "-password -refreshToken -emailVerificationToken -emailVerificationExpiry"
+  );
+
+  return res.status(200).json(new ApiResponse(200, { user: updatedUser }, "Profile updated successfully"));
 })

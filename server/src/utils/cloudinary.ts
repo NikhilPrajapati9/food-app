@@ -10,25 +10,14 @@ cloudinary.config({
     api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-const uploadOnCloudinary = async (localFilePath) => {
-    try {
-        if (!localFilePath) return null
-        //upload the file on cloudinary
-        const response = await cloudinary.uploader.upload(localFilePath, {
-            resource_type: "auto"
-        })
-        // file has been uploaded successfull
-        //console.log("file is uploaded on cloudinary ", response.url);
-        fs.unlinkSync(localFilePath)
-        return response;
+const uploadImageOnCloudinary = async (file: Express.Multer.File) => {
+    const base64Image = Buffer.from(file.buffer).toString("base64");
+    const dataURI = `data:${file.mimetype};base64,${base64Image}`;
+    const uploadResponse = await cloudinary.uploader.upload(dataURI);
+    return uploadResponse.secure_url;
+};
 
-    } catch (error) {
-        fs.unlinkSync(localFilePath) // remove the locally saved temporary file as the upload operation got failed
-        return null;
-    }
-}
-
-const deleteMediaFromCloudinary = async (publicId) => {
+const deleteMediaFromCloudinary = async (publicId: string) => {
     try {
         await cloudinary.uploader.destroy(publicId);
     } catch (error) {
@@ -36,16 +25,4 @@ const deleteMediaFromCloudinary = async (publicId) => {
     }
 };
 
-const deleteVideoFromCloudinary = async (publicId) => {
-    try {
-        await cloudinary.uploader.destroy(publicId, { resource_type: "video" });
-    } catch (error) {
-        console.log(error);
-
-    }
-}
-
-
-
-
-export { uploadOnCloudinary, deleteMediaFromCloudinary, deleteVideoFromCloudinary }
+export { uploadImageOnCloudinary, deleteMediaFromCloudinary }
