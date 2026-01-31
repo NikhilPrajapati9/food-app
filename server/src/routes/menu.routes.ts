@@ -2,9 +2,9 @@ import Router from "express";
 import { isAuthenticated } from "../middlewares/auth.middleware.ts";
 import upload from "../middlewares/multer.middleware.ts";
 import { addMenu, editMenu } from "../controllers/menu.controller.ts";
+import type { Router as ExpressRouter } from "express";
 
-
-const router = Router();    
+const router: ExpressRouter = Router();    
 
 
 router.route("/").post(isAuthenticated, upload.single("imageFile"), addMenu);

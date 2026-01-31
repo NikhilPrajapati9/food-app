@@ -1,9 +1,9 @@
 import express, { Router } from "express";
 import { isAuthenticated } from "../middlewares/auth.middleware.ts";
 import { createCheckoutSession, getOrders, stripeWebhook } from "../controllers/order.controller.ts";
+import type { Router as ExpressRouter } from "express";
 
-
-const router = Router();
+const router:ExpressRouter = Router();
 
 
 

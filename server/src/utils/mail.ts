@@ -11,7 +11,7 @@ const sendEMail = async (options: any) => {
     theme: "default",
     product: {
       name: "FoodApp",
-      link: process.env.CLIENT_URL || "http://localhost:3000",
+      link: process.env.CLIENT_URL || "http://localhost:5173",
     },
   });
 

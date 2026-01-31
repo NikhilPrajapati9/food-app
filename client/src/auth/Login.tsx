@@ -4,18 +4,25 @@ import { userLoginSchema, type LoginInputState } from "@/schema/userSchema"
 
 import { useUserStore } from "@/store/useUserStore"
 import { Loader2, LockKeyhole, Mail } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useForm } from "react-hook-form"
 import { Link, useNavigate } from "react-router-dom"
 
 const Login = () => {
-  const { register, handleSubmit } = useForm()
+  const { register, handleSubmit } = useForm<LoginInputState>()
   const { login, loading } = useUserStore();
   const [errors, setErrors] = useState<Partial<LoginInputState>>({});
   const navigate = useNavigate();
 
+  useEffect(() => {
+    if (loading) {
+      // reset any stale loading state (helps during HMR/dev)
+      useUserStore.setState({ loading: false });
+    }
+  }, []);
 
-  const submitHandler = async (data: any) => {
+
+  const submitHandler = async (data: LoginInputState) => {
 
     const result = userLoginSchema.safeParse(data);
     if (!result.success) {
@@ -29,7 +36,7 @@ const Login = () => {
     }
     try {
       await login(data);
-      navigate("/home");
+      navigate("/");
     } catch (error) {
       console.log(error);
     }

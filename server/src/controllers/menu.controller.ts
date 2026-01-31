@@ -2,12 +2,13 @@ import type { Request, Response } from "express";
 import { asyncHandler } from "../utils/asyncHandler.ts";
 import { deleteMediaFromCloudinary, uploadImageOnCloudinary } from "../utils/cloudinary.ts";
 import { Menu } from "../models/menu.model.ts";
-import { Restaurant } from "../models/restaurant.model";
+import { Restaurant } from "../models/restaurant.model.ts";
 import type mongoose from "mongoose";
 import { ApiError } from "../utils/ApiError.ts";
 import { ApiResponse } from "../utils/ApiResponse.ts";
+import type { RequestHandler } from "express";
 
-export const addMenu = asyncHandler(async (req: Request, res: Response) => {
+export const addMenu: RequestHandler = asyncHandler(async (req: Request, res: Response) => {
 
     const { name, description, price } = req.body;
     const file = req.file;
@@ -34,7 +35,7 @@ export const addMenu = asyncHandler(async (req: Request, res: Response) => {
 
 })
 
-export const editMenu = asyncHandler(async (req: Request, res: Response) => {
+export const editMenu: RequestHandler = asyncHandler(async (req: Request, res: Response) => {
 
     const { id } = req.params;
     const { name, description, price } = req.body ?? {};

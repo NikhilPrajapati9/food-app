@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-
+ 
 export const userSignupSchema = z.object({
     username: z.string().min(1, "Username must be at least 1 characters long"),
     email: z.email("Invalid email address"),

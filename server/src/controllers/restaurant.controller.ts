@@ -1,4 +1,4 @@
-import type { Request, Response } from "express";
+import type { Request, RequestHandler, Response } from "express";
 import { Order } from "../models/order.model.ts";
 import { Restaurant } from "../models/restaurant.model.ts";
 import { ApiError } from "../utils/ApiError.ts";
@@ -7,11 +7,7 @@ import { asyncHandler } from "../utils/asyncHandler.ts";
 import { deleteMediaFromCloudinary, uploadImageOnCloudinary } from "../utils/cloudinary.ts";
 
 
-
-
-
-
-export const createRestaurant = asyncHandler(async (req: Request, res: Response) => {
+export const createRestaurant: RequestHandler = asyncHandler(async (req: Request, res: Response) => {
     const { restaurantName, city, country, deliveryTime, cuisines } = req.body;
     const imageFile = req.file;
     const userId = req.user?._id
@@ -48,7 +44,7 @@ export const createRestaurant = asyncHandler(async (req: Request, res: Response)
     res.status(201).json(new ApiResponse(201, [], "Restaurant created successfully"))
 })
 
-export const getRestaurant = asyncHandler(async (req: Request, res: Response) => {
+export const getRestaurant: RequestHandler = asyncHandler(async (req: Request, res: Response) => {
     const restaurant = await Restaurant.findOne({ user: req.user?._id }).populate("menus");
 
     if (!restaurant) {
@@ -58,7 +54,7 @@ export const getRestaurant = asyncHandler(async (req: Request, res: Response) =>
     return res.status(200).json(new ApiResponse(200, restaurant, "Restaurant fetched successfully"));
 })
 
-export const updateRestaurant = asyncHandler(async (req: Request, res: Response) => {
+export const updateRestaurant: RequestHandler = asyncHandler(async (req: Request, res: Response) => {
     const { restaurantName, city, country, deliveryTime, cuisines } = req.body ?? {};
     const imageFile = req.file;
     const userId = req.user?._id
@@ -102,7 +98,7 @@ export const updateRestaurant = asyncHandler(async (req: Request, res: Response)
 })
 
 
-export const getRestaurantOrder = asyncHandler(async (req: Request, res: Response) => {
+export const getRestaurantOrder: RequestHandler = asyncHandler(async (req: Request, res: Response) => {
     const restaurant = await Restaurant.findOne({ user: req.user?._id });
 
     const orders = await Order.find({ restaurant: restaurant?._id }).populate("user").populate("restaurant");
@@ -111,7 +107,7 @@ export const getRestaurantOrder = asyncHandler(async (req: Request, res: Respons
 })
 
 
-export const updateOrderStatus = asyncHandler(async (req: Request, res: Response) => {
+export const updateOrderStatus: RequestHandler = asyncHandler(async (req: Request, res: Response) => {
     const { orderId } = req.params;
     const { status } = req.body;
 
@@ -128,7 +124,7 @@ export const updateOrderStatus = asyncHandler(async (req: Request, res: Response
 })
 
 
-export const searchRestaurants = asyncHandler(async (req: Request, res: Response) => {
+export const searchRestaurants: RequestHandler = asyncHandler(async (req: Request, res: Response) => {
     const searchText = req.params.searchText || "";
     const searchQuery = req.query.searchQuery as string || "";
     const selectedCuisines = (req.query.selectedCuisines as string || "").split(",").filter(cuisine => cuisine);
@@ -160,7 +156,7 @@ export const searchRestaurants = asyncHandler(async (req: Request, res: Response
     return res.status(200).json(new ApiResponse(200, restaurants, "Restaurants fetched successfully"));
 })
 
-export const getSingleRestaurant = asyncHandler(async (req: Request, res: Response) => {
+export const getSingleRestaurant: RequestHandler = asyncHandler(async (req: Request, res: Response) => {
     const restaurantId = req.params.id;
     const restaurant = await Restaurant.findById(restaurantId).populate({
         path: "menus",

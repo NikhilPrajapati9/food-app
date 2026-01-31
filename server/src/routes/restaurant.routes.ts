@@ -4,10 +4,10 @@ import upload from "../middlewares/multer.middleware.ts";
 import { createRestaurant, getRestaurant, getRestaurantOrder, getSingleRestaurant, searchRestaurants, updateOrderStatus, updateRestaurant } from "../controllers/restaurant.controller.ts";
 import { validate } from "../validators/validate.ts";
 import { createRestaurantValidator, updateOrderStatusValidator, updateRestaurantValidator } from "../validators/restaurant.validators.ts";
+import type { Router as ExpressRouter } from "express";
 
 
-
-const router = Router();
+const router:ExpressRouter = Router();
 
 router.route("/").post(isAuthenticated, createRestaurantValidator(), validate, upload.single("imageFile"), createRestaurant)
 router.route("/").get(isAuthenticated, getRestaurant);

@@ -1,4 +1,4 @@
-import type { Request, Response } from "express";
+import type { Request, RequestHandler, Response } from "express";
 import { asyncHandler } from "../utils/asyncHandler.ts";
 import { Order } from "../models/order.model.ts";
 import { ApiResponse } from "../utils/ApiResponse.ts";
@@ -97,12 +97,12 @@ export const createLineItems = (checkoutSessionRequest: CheckoutSessionRequest, 
     return lineItems;
 }
 
-export const getOrders = asyncHandler(async (req: Request, res: Response) => {
+export const getOrders: RequestHandler = asyncHandler(async (req: Request, res: Response) => {
     const orders = await Order.find({ user: req.user?._id }).populate("user").populate("restaurant");
 
     return res.status(200).json(new ApiResponse(200, { orders }, "Orders fetched successfully"));
 })
-export const createCheckoutSession = asyncHandler(async (req: Request, res: Response) => {
+export const createCheckoutSession: RequestHandler = asyncHandler(async (req: Request, res: Response) => {
     const checkoutSessionRequest: CheckoutSessionRequest = req.body;
 
     const restaurant = await Restaurant.findById(checkoutSessionRequest.restaurantId);

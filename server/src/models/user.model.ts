@@ -2,7 +2,7 @@ import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import mongoose, { Document, Model, Schema } from "mongoose";
-import { USER_TEMPORARY_TOKEN_EXPIRY } from "../constant";
+import { USER_TEMPORARY_TOKEN_EXPIRY } from "../constant.ts";
 
 export interface IUser {
   username: string;

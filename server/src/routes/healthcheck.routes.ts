@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { healthcheck } from "../controllers/healthcheck.controller.ts";
-
-const router = Router();
+import type { Router as ExpressRouter } from "express";
+const router: ExpressRouter = Router();
 
 router.route("/").get(healthcheck);
 

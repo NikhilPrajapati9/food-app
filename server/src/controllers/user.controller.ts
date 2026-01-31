@@ -2,7 +2,7 @@ import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import { User } from "../models/user.model.ts";
 import { ApiError } from "../utils/ApiError.ts";
-import type { Request, Response } from "express";
+import type { Request, RequestHandler, Response } from "express";
 import { ApiResponse } from "../utils/ApiResponse.ts";
 import { asyncHandler } from "../utils/asyncHandler.ts";
 import {
@@ -10,169 +10,242 @@ import {
   forgotPasswordMailgenContent,
   sendEMail,
 } from "../utils/mail.ts";
-import { deleteMediaFromCloudinary, uploadImageOnCloudinary } from "../utils/cloudinary.ts";
+import {
+  deleteMediaFromCloudinary,
+  uploadImageOnCloudinary,
+} from "../utils/cloudinary.ts";
 
-export const signup = asyncHandler(async (req: Request, res: Response) => {
-  const { username, email, password, contact } = req.body;
+export const resendEmailVerification: RequestHandler = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { email } = req.query as { email: string };
 
-  let existUser = await User.findOne({ email });
+    const user = await User.findOne({ email });
 
-  if (existUser) {
+    if (!user) {
+      throw new ApiError(404, "User not found");
+    }
+
+    if (
+      user.emailVerificationTokenExpiresAt &&
+      user.emailVerificationTokenExpiresAt > new Date()
+    ) {
+      return res
+        .status(200)
+        .json(
+          new ApiResponse(
+            200,
+            {},
+            "Verification email has already been sent recently and still valid. Please check your email.",
+          ),
+        );
+    }
+
+    if (user.isEmailVerified) {
+      return res
+        .status(200)
+        .json(new ApiResponse(200, {}, "Email is already verified"));
+    }
+
+    const { unHashedToken, hashedToken, tokenExpiry } =
+      user.generateTemporaryToken();
+
+    user.emailVerificationToken = hashedToken;
+    user.emailVerificationTokenExpiresAt = tokenExpiry;
+    await user.save({ validateBeforeSave: false });
+
+    await sendEMail({
+      email: user?.email,
+      subject: "Please verify your email",
+      mailgenContent: emailVerificationMailgenContent(
+        user.username,
+        `${req.protocol}://${req.get("host")}/verify-email/${unHashedToken}`,
+      ),
+    });
+
     return res
-      .status(400)
-      .json(new ApiResponse(400, null, "User already exist"));
-  }
+      .status(200)
+      .json(
+        new ApiResponse(
+          200,
+          {},
+          "Verification email has been resent to your email address",
+        ),
+      );
+  },
+);
 
-  let user = await User.create({
-    username,
-    email,
-    password,
-    contact: Number(contact),
-  });
+export const signup: RequestHandler = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { username, email, password, contact } = req.body;
 
-  const { unHashedToken, hashedToken, tokenExpiry } =
-    user.generateTemporaryToken();
+    let existUser = await User.findOne({ email });
 
-  user.emailVerificationToken = hashedToken;
-  user.emailVerificationTokenExpiresAt = tokenExpiry;
-  await user.save({ validateBeforeSave: false });
+    if (existUser) {
+      return res
+        .status(400)
+        .json(new ApiResponse(400, null, "User already exist"));
+    }
 
-  await sendEMail({
-    email: user?.email,
-    subject: "Please verify your email",
-    mailgenContent: emailVerificationMailgenContent(
-      user.username,
-      `${req.protocol}://${req.get(
-        "host"
-      )}/api/v1/users/verify-email/${unHashedToken}`
-    ),
-  });
+    let user = await User.create({
+      username,
+      email,
+      password,
+      contact: Number(contact),
+    });
 
-  const createdUser = await User.findById(user._id).select(
-    "-password -refreshToken -emailVerificationToken -emailVerificationExpiry"
-  );
+    const { unHashedToken, hashedToken, tokenExpiry } =
+      user.generateTemporaryToken();
 
-  if (!createdUser) {
-    throw new ApiError(500, "Something went wrong while registering the user");
-  }
+    user.emailVerificationToken = hashedToken;
+    user.emailVerificationTokenExpiresAt = tokenExpiry;
+    await user.save({ validateBeforeSave: false });
 
-  return res
-    .status(201)
-    .json(
-      new ApiResponse(
-        200,
-        { user: createdUser },
-        "Users registered successfully and verification email has been sent on your email."
-      )
+    await sendEMail({
+      email: user?.email,
+      subject: "Please verify your email",
+      mailgenContent: emailVerificationMailgenContent(
+        user.username,
+        `${req.protocol}://${req.get("host")}/verify-email/${unHashedToken}`,
+      ),
+    });
+
+    const createdUser = await User.findById(user._id).select(
+      "-password -refreshToken -emailVerificationToken -emailVerificationExpiry",
     );
-});
 
-export const login = asyncHandler(async (req: Request, res: Response) => {
-  const { email, password } = req.body;
+    if (!createdUser) {
+      throw new ApiError(
+        500,
+        "Something went wrong while registering the user",
+      );
+    }
 
-  const user = await User.findOne({ email });
+    return res
+      .status(201)
+      .json(
+        new ApiResponse(
+          200,
+          { user: createdUser },
+          "Users registered successfully and verification email has been sent on your email.",
+        ),
+      );
+  },
+);
 
-  if (!user) {
-    throw new ApiError(404, "User not found");
-  }
+export const login: RequestHandler = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { email, password } = req.body;
 
-  const isPasswordCorrect = user.isPasswordCorrect(password);
+    const user = await User.findOne({ email });
 
-  if (!isPasswordCorrect) {
-    throw new ApiError(401, "Invalid credentials");
-  }
+    if (!user) {
+      throw new ApiError(404, "User not found");
+    }
 
-  const accessToken = user.generateAccessToken();
-  const refreshToken = user.generateRefreshToken();
+    const isPasswordCorrect = user.isPasswordCorrect(password);
 
-  user.refreshToken = refreshToken;
-  user.lastLogin = new Date();
-  await user.save();
+    if (!isPasswordCorrect) {
+      throw new ApiError(401, "Invalid credentials");
+    }
 
-  // get the user document ignoring the password and refreshToken field
-  const loggedInUser = await User.findById(user._id).select(
-    "-password -refreshToken -emailVerificationToken -emailVerificationExpiry"
-  );
+    const accessToken = user.generateAccessToken();
+    const refreshToken = user.generateRefreshToken();
 
-  const options = {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-  };
+    user.refreshToken = refreshToken;
+    user.lastLogin = new Date();
+    await user.save();
 
-  return res
-    .status(200)
-    .cookie("accessToken", accessToken, options) // set the access token in the cookie
-    .cookie("refreshToken", refreshToken, options) // set the refresh token in the cookie
-    .json(
-      new ApiResponse(
-        200,
-        { user: loggedInUser, accessToken, refreshToken }, // send access and refresh token in response if client decides to save them by themselves
-        "User logged in successfully"
-      )
+    // get the user document ignoring the password and refreshToken field
+    const loggedInUser = await User.findById(user._id).select(
+      "-password -refreshToken -emailVerificationToken -emailVerificationExpiry",
     );
-});
 
-export const verifyEmail = asyncHandler(async (req: Request, res: Response) => {
-  const { verificationToken } = req.params;
+    const options = {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+    };
 
-  if (!verificationToken) {
-    throw new ApiError(400, "Email verification token is missing");
-  }
+    return res
+      .status(200)
+      .cookie("accessToken", accessToken, options) // set the access token in the cookie
+      .cookie("refreshToken", refreshToken, options) // set the refresh token in the cookie
+      .json(
+        new ApiResponse(
+          200,
+          { user: loggedInUser, accessToken, refreshToken }, // send access and refresh token in response if client decides to save them by themselves
+          "User logged in successfully",
+        ),
+      );
+  },
+);
 
-  // generate a hash from the token that we are receiving
-  let hashedToken = crypto
-    .createHash("sha256")
-    .update(verificationToken)
-    .digest("hex");
+export const verifyEmail: RequestHandler = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { verificationToken } = req.params as { verificationToken: string };
 
-  // While registering the user, same time when we are sending the verification mail
-  // we have saved a hashed value of the original email verification token in the db
-  // We will try to find user with the hashed token generated by received token
-  // If we find the user another check is if token expiry of that token is greater than current time if not that means it is expired
-  const user = await User.findOne({
-    emailVerificationToken: hashedToken,
-    emailVerificationTokenExpiresAt: { $gt: Date.now() },
-  });
+    if (!verificationToken) {
+      throw new ApiError(400, "Email verification token is missing");
+    }
 
-  if (!user) {
-    throw new ApiError(489, "Token is invalid or expired");
-  }
+    // generate a hash from the token that we are receiving
+    let hashedToken = crypto
+      .createHash("sha256")
+      .update(verificationToken)
+      .digest("hex");
 
-  user.emailVerificationToken = undefined;
-  user.emailVerificationTokenExpiresAt = undefined;
+    // While registering the user, same time when we are sending the verification mail
+    // we have saved a hashed value of the original email verification token in the db
+    // We will try to find user with the hashed token generated by received token
+    // If we find the user another check is if token expiry of that token is greater than current time if not that means it is expired
+    const user = await User.findOne({
+      emailVerificationToken: hashedToken,
+      emailVerificationTokenExpiresAt: { $gt: Date.now() },
+    });
 
-  user.isEmailVerified = true;
-  await user.save();
+    if (!user) {
+      return res
+        .status(489)
+        .json(new ApiResponse(489, {}, "Token is invalid or expired"));
+    }
 
-  return res
-    .status(200)
-    .json(new ApiResponse(200, {user}, "Email is verified"));
-});
+    user.emailVerificationToken = null as any;
+    user.emailVerificationTokenExpiresAt = null as any;
 
-export const logout = asyncHandler(async (req: Request, res: Response) => {
-  await User.findByIdAndUpdate(
-    req.user?._id,
-    {
-      $set: {
-        refreshToken: "",
+    user.isEmailVerified = true;
+    await user.save();
+
+    return res
+      .status(200)
+      .json(new ApiResponse(200, { user }, "Email is verified"));
+  },
+);
+
+export const logout: RequestHandler = asyncHandler(
+  async (req: Request, res: Response) => {
+    await User.findByIdAndUpdate(
+      req.user?._id,
+      {
+        $set: {
+          refreshToken: "",
+        },
       },
-    },
-    { new: true }
-  );
+      { new: true },
+    );
 
-  const options = {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-  };
+    const options = {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+    };
 
-  return res
-    .status(200)
-    .clearCookie("accessToken", options)
-    .clearCookie("refreshToken", options)
-    .json(new ApiResponse(200, {}, "User logged out"));
-});
+    return res
+      .status(200)
+      .clearCookie("accessToken", options)
+      .clearCookie("refreshToken", options)
+      .json(new ApiResponse(200, {}, "User logged out"));
+  },
+);
 
-export const refreshAccessToken = asyncHandler(
+export const refreshAccessToken: RequestHandler = asyncHandler(
   async (req: Request, res: Response) => {
     const incomingRefreshToken =
       req.cookies.refreshToken ||
@@ -186,7 +259,7 @@ export const refreshAccessToken = asyncHandler(
       const secret = process.env.REFRESH_TOKEN_SECRET;
       if (!secret) {
         throw new Error(
-          "ACCESS_TOKEN_SECRET environment variable is not defined"
+          "ACCESS_TOKEN_SECRET environment variable is not defined",
         );
       }
       const decoded = jwt.verify(incomingRefreshToken, secret);
@@ -197,7 +270,7 @@ export const refreshAccessToken = asyncHandler(
         throw new ApiError(401, "Invalid token payload");
       }
       const user = await User.findById(decodedToken._id).select(
-        "-password -refreshToken -emailVerificationToken -emailVerificationExpiry"
+        "-password -refreshToken -emailVerificationToken -emailVerificationExpiry",
       );
 
       if (!user) {
@@ -228,18 +301,18 @@ export const refreshAccessToken = asyncHandler(
           new ApiResponse(
             200,
             { accessToken, refreshToken: newRefreshToken },
-            "Access token refreshed"
-          )
+            "Access token refreshed",
+          ),
         );
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Invalid refresh token";
       throw new ApiError(401, errorMessage);
     }
-  }
+  },
 );
 
-export const forgotPasswordRequest = asyncHandler(
+export const forgotPasswordRequest: RequestHandler = asyncHandler(
   async (req: Request, res: Response) => {
     const { email } = req.body;
     const user = await User.findOne({ email });
@@ -260,7 +333,7 @@ export const forgotPasswordRequest = asyncHandler(
       subject: "Reset your password",
       mailgenContent: forgotPasswordMailgenContent(
         user.username,
-        `${process.env.FORGOT_PASSWORD_REDIRECT_URL}/${unHashedToken}`
+        `${process.env.FORGOT_PASSWORD_REDIRECT_URL}/${unHashedToken}`,
       ),
     });
     return res
@@ -269,24 +342,24 @@ export const forgotPasswordRequest = asyncHandler(
         new ApiResponse(
           200,
           {},
-          "Password reset mail has been sent on your mail id"
-        )
+          "Password reset mail has been sent on your mail id",
+        ),
       );
-  }
+  },
 );
 
-export const resetForgottenPassword = asyncHandler(
+export const resetForgottenPassword: RequestHandler = asyncHandler(
   async (req: Request, res: Response) => {
-    const { resestToken } = req.params;
+    const { resetToken } = req.params as { resetToken: string };
     const { newPassword } = req.body;
 
-    if (!resestToken) {
+    if (!resetToken) {
       throw new ApiError(400, "Password reset token is missing");
     }
 
     let hashedToken = crypto
       .createHash("sha256")
-      .update(resestToken)
+      .update(resetToken)
       .digest("hex");
 
     const user = await User.findOne({
@@ -298,8 +371,8 @@ export const resetForgottenPassword = asyncHandler(
       throw new ApiError(404, "Token is invalid or expired");
     }
 
-    user.forgotPasswordToken = undefined;
-    user.forgotPasswordTokenExpiresAt = undefined;
+    user.forgotPasswordToken = null as any;
+    user.forgotPasswordTokenExpiresAt = null as any;
     user.password = newPassword;
 
     await user.save();
@@ -307,10 +380,10 @@ export const resetForgottenPassword = asyncHandler(
     return res
       .status(200)
       .json(new ApiResponse(200, {}, "Password reset successfully"));
-  }
+  },
 );
 
-export const changeCurrentPassword = asyncHandler(
+export const changeCurrentPassword: RequestHandler = asyncHandler(
   async (req: Request, res: Response) => {
     const { oldPassword, newPassword } = req.body;
 
@@ -332,64 +405,78 @@ export const changeCurrentPassword = asyncHandler(
     return res
       .status(200)
       .json(new ApiResponse(200, {}, "Password changed successfully"));
-  }
+  },
 );
 
-export const checkAuth = asyncHandler(async (req: Request, res: Response) => {
-  const user = await User.findById(req.user?._id).select(
-    "-password -refreshToken -emailVerificationToken -emailVerificationExpiry"
-  );
+export const checkAuth: RequestHandler = asyncHandler(
+  async (req: Request, res: Response) => {
+    const user = await User.findById(req.user?._id).select(
+      "-password -refreshToken -emailVerificationToken -emailVerificationExpiry",
+    );
 
-  if (!user) {
-    throw new ApiError(404, "User not found");
-  }
-
-  return res
-    .status(200)
-    .json(new ApiResponse(200, { user }, "User is authenticated"));
-})
-
-export const updateProfile = asyncHandler(async (req: Request, res: Response) => {
-  const { address, username, city, country } = req.body ?? {};
-  const profilePicture = req.file;
-  const userId = req.user?._id;
-
-  const user = await User.findById(userId);
-
-  if (!user) {
-    throw new ApiError(404, "User not found");
-  }
-
-  let cloudinaryUrl = "";
-
-  if (profilePicture) {
-    cloudinaryUrl = await uploadImageOnCloudinary(profilePicture as Express.Multer.File);
-
-    if (!cloudinaryUrl) {
-      throw new ApiError(500, "Failed to upload image");
+    if (!user) {
+      throw new ApiError(404, "User not found");
     }
 
-    if (user.profilePicture) {
-      const publicId = user.profilePicture?.split("/")?.pop()?.split(".")[0];
-      if (publicId) {
-        await deleteMediaFromCloudinary(publicId);
-      } else {
-        throw new ApiError(500, "Failed to get public ID of the old image");
+    return res
+      .status(200)
+      .json(new ApiResponse(200, { user }, "User is authenticated"));
+  },
+);
+
+export const updateProfile: RequestHandler = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { address, username, city, country } = req.body ?? {};
+    const profilePicture = req.file;
+    const userId = req.user?._id;
+
+    const user = await User.findById(userId);
+
+    if (!user) {
+      throw new ApiError(404, "User not found");
+    }
+
+    let cloudinaryUrl = "";
+
+    if (profilePicture) {
+      cloudinaryUrl = await uploadImageOnCloudinary(
+        profilePicture as Express.Multer.File,
+      );
+
+      if (!cloudinaryUrl) {
+        throw new ApiError(500, "Failed to upload image");
+      }
+
+      if (user.profilePicture) {
+        const publicId = user.profilePicture?.split("/")?.pop()?.split(".")[0];
+        if (publicId) {
+          await deleteMediaFromCloudinary(publicId);
+        } else {
+          throw new ApiError(500, "Failed to get public ID of the old image");
+        }
       }
     }
-  }
 
-  if (username) user.username = username;
-  if (address) user.address = address;
-  if (city) user.city = city;
-  if (country) user.country = country;
-  if (profilePicture) user.profilePicture = cloudinaryUrl;
+    if (username) user.username = username;
+    if (address) user.address = address;
+    if (city) user.city = city;
+    if (country) user.country = country;
+    if (profilePicture) user.profilePicture = cloudinaryUrl;
 
-  await user.save();
+    await user.save();
 
-  const updatedUser = await User.findById(userId).select(
-    "-password -refreshToken -emailVerificationToken -emailVerificationExpiry"
-  );
+    const updatedUser = await User.findById(userId).select(
+      "-password -refreshToken -emailVerificationToken -emailVerificationExpiry",
+    );
 
-  return res.status(200).json(new ApiResponse(200, { user: updatedUser }, "Profile updated successfully"));
-})
+    return res
+      .status(200)
+      .json(
+        new ApiResponse(
+          200,
+          { user: updatedUser },
+          "Profile updated successfully",
+        ),
+      );
+  },
+);
